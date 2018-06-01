@@ -43,6 +43,29 @@ class LabelsError(Exception):
 
 class SOMFactory(object):
 
+    """
+    Inicializacao da SOM, recebendo seus parametros, onde:
+        - data: eh a matriz de dados, de m linhas e n colunas. cada linha representa um dado,
+        e cada coluna representa um atributo do dado
+        - mapsize: sao as dimensoes da SOM, que usamos sempre em formato de matriz pois queremos
+        uma SOM bidimensional. valores diferentes serao usados no trabalho. ex: '[10,10]'
+        - mask: parametro opcional para o pos processamento, nao utilizados no trabalho
+        - mapshape: define a forma do SOM. no trabalho, vamos usar sempre uma SOM plana, logo,
+        com esse parametro recebe sempre o valor 'planar'
+        - lattice: formato da lattice, usada durante os ajustes na vizinhanca. pode
+        ser hexagonal ou retangular. vamos usar sempre 'rect'
+        - normalization: tipo de normalizacao usada para os calculos de aproximacao. vamos sempre usar
+        var, que significa variancia
+        - initialization: define qual metodo utilizar para inicializar a SOM. pode ser
+        'random' ou 'pca', e vamos usar ambos no trabalho
+        - neighborhood: qual metodo sera utilizado para o calculo da vizinhanca no som. pode ser 
+        'gaussian' ou 'bubble'
+        - training: modo de treinamento. pode ser seq ou batch, indicando se o mesmo acontecera
+        sequencialmente ou em blocos. vamos usar 'batch'
+        - name: um nome que podemos atribuir a SOM
+        - component_names: os nomes dos componentes, caso existam. nao vamos definir nada
+        antes do pos processamento, mas no nosso caso seriam as palavras (colunas dos dados)
+    """
     @staticmethod
     def build(data,
               mapsize=None,
@@ -55,44 +78,15 @@ class SOMFactory(object):
               training='batch',
               name='sompy',
               component_names=None):
-        """
-        :param data: data to be clustered, represented as a matrix of n rows,
-            as inputs and m cols as input features
-        :param neighborhood: neighborhood object calculator.  Options are:
-            - gaussian
-            - bubble
-            - manhattan (not implemented yet)
-            - cut_gaussian (not implemented yet)
-            - epanechicov (not implemented yet)
 
-        :param normalization: normalizer object calculator. Options are:
-            - var
-
-        :param mapsize: tuple/list defining the dimensions of the som.
-            If single number is provided is considered as the number of nodes.
-        :param mask: mask
-        :param mapshape: shape of the som. Options are:
-            - planar
-            - toroid (not implemented yet)
-            - cylinder (not implemented yet)
-
-        :param lattice: type of lattice. Options are:
-            - rect
-            - hexa (not implemented yet)
-
-        :param initialization: method to be used for initialization of the som.
-            Options are:
-            - pca
-            - random
-
-        :param name: name used to identify the som
-        :param training: Training mode (seq, batch)
-        """
+        #chama as factories do normalizador e do calculador de vizinhanca escolhidos
+        #para serem usados posteriormente
         if normalization:
             normalizer = NormalizatorFactory.build(normalization)
         else:
             normalizer = None
         neighborhood_calculator = NeighborhoodFactory.build(neighborhood)
+
         return SOM(data, neighborhood_calculator, normalizer, mapsize, mask,
                    mapshape, lattice, initialization, training, name, component_names)
 
@@ -111,22 +105,7 @@ class SOM(object):
                  training='batch',
                  name='sompy',
                  component_names=None):
-        """
-        Self Organizing Map
 
-        :param data: data to be clustered, represented as a matrix of n rows,
-            as inputs and m cols as input features
-        :param neighborhood: neighborhood object calculator.
-        :param normalizer: normalizer object calculator.
-        :param mapsize: tuple/list defining the dimensions of the som. If
-            single number is provided is considered as the number of nodes.
-        :param mask: mask
-        :param mapshape: shape of the som.
-        :param lattice: type of lattice.
-        :param initialization: method to be used for initialization of the som.
-        :param name: name used to identify the som
-        :param training: Training mode (seq, batch)
-        """
         self._data = normalizer.normalize(data) if normalizer else data
         self._normalizer = normalizer
         self._dim = data.shape[1]
@@ -155,8 +134,8 @@ class SOM(object):
         if self._dim == len(compnames):
             self._component_names = np.asarray(compnames)[np.newaxis, :]
         else:
-            raise ComponentNamesError('Component names should have the same '
-                                      'size as the data dimension/features')
+            raise ComponentNamesError('Os nomes dos componentes precisam ter '
+                                      'a mesma quantidade que o numero de colunas dos dados')
 
     def build_component_names(self):
         cc = ['Variable-' + str(i+1) for i in range(0, self._dim)]
@@ -169,9 +148,10 @@ class SOM(object):
     @data_labels.setter
     def data_labels(self, labels):
         """
-        Set labels of the training data, it should be in the format of a list
-        of strings
+        Define os formatos das labels. precisa ser lista ou strings
         """
+        #as labels podem estar em formato 'um por linha da matriz' ou 'um por coluna'
+        #ou seja, podem indicar os dados ou atributos
         if labels.shape == (1, self._dlen):
             label = labels.T
         elif labels.shape == (self._dlen, 1):
@@ -179,7 +159,7 @@ class SOM(object):
         elif labels.shape == (self._dlen,):
             label = labels[:, np.newaxis]
         else:
-            raise LabelsError('wrong label format')
+            raise LabelsError('Formato invalido de labels')
 
         self._dlabel = label
 
@@ -199,6 +179,16 @@ class SOM(object):
             distance_matrix[i] = self.codebook.grid_dist(i).reshape(1, nnodes)
         return distance_matrix
 
+
+    """
+    Funcao que faz o treinamento da SOM. Parametros relevantes pro trabalho:
+        - n_job: numero de jobs usados para paralelizar o treinamento. o codigo, por enquanto,
+        so suporta 1
+        - verbose: o nivel de debug do treinamento. pode assumir 'debug' ou 'info'. vamos usar info
+        para obter apenas interessantes durante a execucao
+        - shared_memory: flag pra controlar a ativação do compartilhamento de memoria, que nao
+        vamos usar
+    """
     @timeit()
     def train(self,
               n_job=1,
@@ -212,14 +202,8 @@ class SOM(object):
               train_finetune_radiusfin=None,
               train_len_factor=1,
               maxtrainlen=np.Inf):
-        """
-        Trains the som
 
-        :param n_job: number of jobs to use to parallelize the traning
-        :param shared_memory: flag to active shared memory
-        :param verbose: verbosity, could be 'debug', 'info' or None
-        :param train_len_factor: Factor that multiply default training lenghts (similar to "training" parameter in the matlab version). (lbugnon)
-        """
+        #seta nivel de debug conforme escolhido
         logging.root.setLevel(
             getattr(logging, verbose.upper()) if verbose else logging.ERROR)
 
@@ -240,12 +224,14 @@ class SOM(object):
                         self._dlen * self.codebook.nnodes * self._dim),
                     n_job=n_job))
 
+        #faz a inicializacao conforme especificacao nos parametros
         if self.initialization == 'random':
             self.codebook.random_initialization(self._data)
 
         elif self.initialization == 'pca':
             self.codebook.pca_linear_initialization(self._data)
 
+        #com todos os parametros definidos, chama finalmente os metodos de treinamento
         self.rough_train(njob=n_job, shared_memory=shared_memory, trainlen=train_rough_len,
                          radiusin=train_rough_radiusin, radiusfin=train_rough_radiusfin,trainlen_factor=train_len_factor,maxtrainlen=maxtrainlen)
         self.finetune_train(njob=n_job, shared_memory=shared_memory, trainlen=train_finetune_len,
@@ -261,21 +247,32 @@ class SOM(object):
         if mn == 1:
             mpd = float(self.codebook.nnodes*10)/float(self._dlen)
         else:
+            #nos exemplos, sempre entramos no else, que calcula o total de neuronios da SOM
+            #dividido pela quantidade de dados
             mpd = float(self.codebook.nnodes)/float(self._dlen)
         ms = max_s/2.0 if mn == 1 else max_s
 
         return ms, mpd
 
+    #faz o "treinamento pesado", que eh a primeira parte do treinamento da SOM
     def rough_train(self, njob=1, shared_memory=False, trainlen=None, radiusin=None, radiusfin=None,trainlen_factor=1,maxtrainlen=np.Inf):
         logging.info(" Rough training...")
 
+        #variaveis que guardam o tamanho da SOM, onde ms significa mapsize e mpd significa
+        #o numero de neuronios por dado
         ms, mpd = self._calculate_ms_and_mpd()
-        #lbugnon: add maxtrainlen
+        
+        #caso nao esteja pre setada um tamanho maximo de treino, seta na hora
+        #estamos trabalhando sempre com esse valor infinito
         trainlen = min(int(np.ceil(30*mpd)),maxtrainlen) if not trainlen else trainlen
-        #print("maxtrainlen %d",maxtrainlen)
-        #lbugnon: add trainlen_factor
+
+        #Adiciona o trainlen_factor, que eh irrelevante para os parametros que estamos usando
         trainlen=int(trainlen*trainlen_factor)
         
+        #define o raio inicial e final a serem usados no treinamento
+        #nessa fase do algoritmo, esses valores sao grandes pois estamos focando em formar os 
+        #grupos, sem necessariamente muita precisao. podemos buscar raios um pouco menores caso a
+        #inicializacao tenha sido feita usando PCA
         if self.initialization == 'random':
             radiusin = max(1, np.ceil(ms/3.)) if not radiusin else radiusin
             radiusfin = max(1, radiusin/6.) if not radiusfin else radiusfin
@@ -291,29 +288,28 @@ class SOM(object):
 
         ms, mpd = self._calculate_ms_and_mpd()
 
-        #lbugnon: add maxtrainlen
+        #mesma coisa que a fase de treinamento pesado, mas com um limite de vezes de execucao e
+        #com um raio menor, para aperfeicoar ainda mais os grupos
         if self.initialization == 'random':
             trainlen = min(int(np.ceil(50*mpd)),maxtrainlen) if not trainlen else trainlen
-            radiusin = max(1, ms/12.)  if not radiusin else radiusin # from radius fin in rough training
+            radiusin = max(1, ms/12.)  if not radiusin else radiusin
             radiusfin = max(1, radiusin/25.) if not radiusfin else radiusfin
 
         elif self.initialization == 'pca':
             trainlen = min(int(np.ceil(40*mpd)),maxtrainlen) if not trainlen else trainlen
             radiusin = max(1, np.ceil(ms/8.)/4) if not radiusin else radiusin
-            radiusfin = 1 if not radiusfin else radiusfin # max(1, ms/128)
-
-        #print("maxtrainlen %d",maxtrainlen)
+            radiusfin = 1 if not radiusfin else radiusfin
         
-        #lbugnon: add trainlen_factor
         trainlen=int(trainlen_factor*trainlen)
-        
             
         self._batchtrain(trainlen, radiusin, radiusfin, njob, shared_memory)
 
+    #metodo que faz os calculos dos blocos
     def _batchtrain(self, trainlen, radiusin, radiusfin, njob=1,
                     shared_memory=False):
         radius = np.linspace(radiusin, radiusfin, trainlen)
 
+        #nao vamos usar memoria compartilhada
         if shared_memory:
             data = self._data
             data_folder = tempfile.mkdtemp()
@@ -326,57 +322,56 @@ class SOM(object):
 
         bmu = None
 
-        # X2 is part of euclidean distance (x-y)^2 = x^2 +y^2 - 2xy that we use
-        # for each data row in bmu finding.
-        # Since it is a fixed value we can skip it during bmu finding for each
-        # data point, but later we need it calculate quantification error
+        #x2 é uma parte fixa da distancia euclidiana (x-y)^2 = x^2 +y^2 - 2xy 
+        #que usamos na hora de calcular o erro de quantizacao
+        #e para atualizar o bmu
         fixed_euclidean_x2 = np.einsum('ij,ij->i', data, data)
 
         logging.info(" radius_ini: %f , radius_final: %f, trainlen: %d\n" %
                      (radiusin, radiusfin, trainlen))
 
+        #treina n vezes, onde n eh o tamanho do treinamento definido via parametro no inicio
         for i in range(trainlen):
             t1 = time()
+            #calcula a vizinhanca passando os parametros de tamanho de vizinhanca definidos anteriormente
             neighborhood = self.neighborhood.calculate(
                 self._distance_matrix, radius[i], self.codebook.nnodes)
+            #encontra o bmu (best matching unit)
             bmu = self.find_bmu(data, njb=njob)
+            #atualiza o codebook, que eh a matriz que guarda os valores de cada neuronio
             self.codebook.matrix = self.update_codebook_voronoi(data, bmu,
                                                                 neighborhood)
 
-            #lbugnon: ojo! aca el bmy[1] a veces da negativo, y despues de eso se rompe...hay algo raro ahi
+            #calcula o erro de quantizacao e quanto tempo ele levou
+            #o erro de quantizacao se dá pela media da soma do bmu com a distancia
+            #euclidiana de cada dado, elevados ao quadrado
             qerror = (i + 1, round(time() - t1, 3),
-                      np.mean(np.sqrt(bmu[1] + fixed_euclidean_x2))) #lbugnon: ojo aca me tiró un warning, revisar (commit sinc: 965666d3d4d93bcf48e8cef6ea2c41a018c1cb83 )
-            #lbugnon
-            #ipdb.set_trace()
-            #
+                      np.mean(np.sqrt(bmu[1] + fixed_euclidean_x2)))
+
             logging.info(
                 " epoch: %d ---> elapsed time:  %f, quantization error: %f\n" %
                 qerror)
             if np.any(np.isnan(qerror)):
                 logging.info("nan quantization error, exit train\n")
-                
-                #sys.exit("quantization error=nan, exit train")
-            
+                            
+        #atualiza o BMU somando seu valor antigo com as distancias euclidianas
         bmu[1] = np.sqrt(bmu[1] + fixed_euclidean_x2)
         self._bmu = bmu
 
+    #funcao que encontra o BMU pra cada dado de forma paralela
+    #recebe por parametro uma matriz em que as linhas sao os dados e as colunas dimensoes
     @timeit(logging.DEBUG)
     def find_bmu(self, input_matrix, njb=1, nth=1):
-        """
-        Finds the best matching unit (bmu) for each input data from the input
-        matrix. It does all at once parallelizing the calculation instead of
-        going through each input and running it against the codebook.
-
-        :param input_matrix: numpy matrix representing inputs as rows and
-            features/dimension as cols
-        :param njb: number of jobs to parallelize the search
-        :returns: the best matching unit for each input
-        """
+        #variavel que guarda a quantidade de dimensoes
         dlen = input_matrix.shape[0]
+        #valcula as distancias euclidianas
         y2 = np.einsum('ij,ij->i', self.codebook.matrix, self.codebook.matrix)
         if njb == -1:
             njb = cpu_count()
 
+        #toda essa estrutura foi criada para a paralizacao do processamento
+        #a logica para de fato encontrar o BMU esta no metodo _chunk_based_bmu_find,
+        #explicado mais abaixo
         pool = Pool(njb)
         chunk_bmu_finder = _chunk_based_bmu_find
 
@@ -394,27 +389,18 @@ class SOM(object):
         del b
         return bmu
 
+    """
+    metodo para atualizar todos os neuronios que pertencem a vizinhanca do BMU.
+    primeiro ele monta uma mini matriz com a vizinhanca de cada neuronio
+    eh um metodo super eficiente, baseado na implementacao do algoritmo da SOM
+    toolbox para matlab, feito pela Helsinky University
+    parametros:
+     - training_data: os dados no formato de sempre (m linhas sao dados, n colunas sao dimensoes)
+     - bmu: o bmu pra cada dado. tem formato (2, m) e a primeira row guarda os indices dos BMU
+
+    """
     @timeit(logging.DEBUG)
     def update_codebook_voronoi(self, training_data, bmu, neighborhood):
-        """
-        Updates the weights of each node in the codebook that belongs to the
-        bmu's neighborhood.
-
-        First finds the Voronoi set of each node. It needs to calculate a
-        smaller matrix.
-        Super fast comparing to classic batch training algorithm, it is based
-        on the implemented algorithm in som toolbox for Matlab by Helsinky
-        University.
-
-        :param training_data: input matrix with input vectors as rows and
-            vector features as cols
-        :param bmu: best matching unit for each input data. Has shape of
-            (2, dlen) where first row has bmu indexes
-        :param neighborhood: matrix representing the neighborhood of each bmu
-
-        :returns: An updated codebook that incorporates the learnings from the
-            input data
-        """
         row = bmu[0].astype(int)
         col = np.arange(self._dlen)
         val = np.tile(1, self._dlen)

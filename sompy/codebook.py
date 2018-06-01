@@ -18,6 +18,8 @@ class Codebook(object):
     def __init__(self, mapsize, lattice='rect'):
         self.lattice = lattice
 
+        #para o caso de SOMs bidimensionais, mapsize nao sofre alteracoes do que foi recebido por
+        #parametro caso ambos sejam maiores que 1, como no trabalho
         if 2 == len(mapsize):
             _size = [1, np.max(mapsize)] if 1 == np.min(mapsize) else mapsize
 

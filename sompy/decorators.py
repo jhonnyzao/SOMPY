@@ -3,6 +3,8 @@ from functools import wraps
 from time import time
 
 
+#decorator que mede o tempo da execucao
+# eh dinamico e recebe e imprime o nome da funcao executada, tal como 'treinamento'
 def timeit(log_level=logging.INFO, alternative_title=None):
     def wrap(f):
         @wraps(f)  # keeps the f.__name__ outside the wrapper
